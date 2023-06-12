@@ -1,0 +1,92 @@
+version: "3"
+
+services:
+
+    nginx:
+        image: nginx:1.24.0
+        ports:
+            - "${APP_PORT:-80}:80"
+        container_name: ifeel_nginx
+        restart: unless-stopped
+        tty: true
+        volumes:
+            - ./:/var/www
+            - ./docker/nginx/conf.d:/etc/nginx/conf.d
+        depends_on:
+            - backend
+        networks:
+            - ifeel_network
+
+    backend:
+        build:
+            context: ./
+            dockerfile: docker/backend/Dockerfile
+        extra_hosts:
+            #            host for debugger
+            - "host.docker.internal:host-gateway"
+        container_name: ifeel_backend
+        restart: unless-stopped
+        tty: true
+        volumes:
+            - ./:/var/www
+        depends_on:
+            - db
+            - redis
+        networks:
+            - ifeel_network
+
+    db:
+        image: mysql:8.0
+        ports:
+            - '${FORWARD_DB_PORT:-3306}:3306'
+        container_name: ifeel_db
+        restart: unless-stopped
+        tty: true
+        environment:
+            MYSQL_DATABASE: ${DB_DATABASE}
+            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+        command: mysqld --character-set-server=utf8 --collation-server=utf8_unicode_ci
+        volumes:
+            - ./storage/db:/var/lib/mysql
+        networks:
+            - ifeel_network
+        healthcheck:
+            test: [ 'CMD', 'mysqladmin', 'ping','-p${DB_PASSWORD}' ]
+            retries: 3
+            timeout: 5s
+
+    redis:
+        image: redis:7
+        ports:
+            - "${FORWARD_REDIS_PORT:-6379}:6379"
+        container_name: ifeel_redis
+        restart: unless-stopped
+        tty: true
+        command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD}"
+        volumes:
+            - ./storage/redis:/data
+        networks:
+            - ifeel_network
+        healthcheck:
+            test: [ 'CMD', 'redis-cli', 'ping' ]
+            retries: 3
+            timeout: 5s
+
+    node:
+        build:
+            context: ./
+            dockerfile: ./docker/nodejs/Dockerfile
+        ports:
+            - "5173:5173"
+        container_name: ifeel_node
+        tty: true
+        volumes:
+            - .:/var/www
+        depends_on:
+            - backend
+        networks:
+            - ifeel_network
+
+networks:
+    ifeel_network:
+        driver: bridge
